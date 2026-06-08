@@ -1,0 +1,25 @@
+# Token e sessione (mai su GitHub)
+config.yaml
+local_session.yaml
+orgchart_config.json
+
+# Output estrazioni
+output/
+debug/
+risposta_raw*.json
+
+# Build / Python
+__pycache__/
+*.pyc
+.venv/
+venv/
+build/
+dist/
+*.spec
+
+# Log di test locali
+swchart*.txt
+
+# OS
+.DS_Store
+Thumbs.db

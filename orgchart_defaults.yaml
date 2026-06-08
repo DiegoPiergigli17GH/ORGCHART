@@ -1,0 +1,14 @@
+# Impostazioni Ariston — non contiene token (quelli si incollano nella GUI)
+base_url: "https://ariston.production.ingentis-iomsf.eu"
+email_domain: "@ariston.com"
+company_name: "Ariston Group"
+perspective: 4928
+chart_id: "4925"
+root_node_id: "FODepartment::NTAwMDAyMjU:3.FODepartment::NTAzMTQ3MjU:3"
+request_delay: 0.8      # aumenta a 1.2 se vedi "connessione interrotta"
+max_retries: 8
+retry_backoff: 4      # secondi base tra retry (× numero tentativo)
+timeout: 60
+debug_raw: false
+position_batch_size: 20   # Position per chiamata batch (isListRequest=true)
+output_dir: "output"
