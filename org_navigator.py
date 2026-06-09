@@ -8,13 +8,7 @@ from pathlib import Path
 import pandas as pd
 
 from guidelines_index import GuidelinesIndex, MarketMatch
-
-# Segmenti gerarchia troppo generici per inferire il country
-_GENERIC_DEPT_NAMES = frozenset({
-    "group", "corporate", "amea", "eur", "emea", "apac", "americas",
-    "europe", "east and west europe", "west europe", "east europe",
-    "supply chain & operations", "group human resources",
-})
+from org_enrich import add_org_columns, dept_chain
 
 
 class OrgNavigator:
@@ -68,17 +62,9 @@ class OrgNavigator:
             return
 
         self._market_lookup = guidelines.market_name_lookup()
-        names = self.dept_name_map()
-        org_paths: list[str] = []
-        countries: list[str] = []
-
-        for _, row in self.df.iterrows():
-            chain = dept_chain(str(row.get("hierarchy_path", "")), names)
-            org_paths.append(" › ".join(chain) if chain else "")
-            countries.append(detect_country(chain, self._market_lookup))
-
-        self.df["org_path"] = org_paths
-        self.df["country"] = countries
+        self.df = add_org_columns(
+            self.df, self.dept_name_map(), self._market_lookup
+        )
 
     def filter_by_market(self, match: MarketMatch) -> pd.DataFrame:
         """Solo persone il cui percorso org contiene il mercato (es. Romania), non tutta l'area EUR."""
@@ -207,43 +193,6 @@ def _employee_row_dict(r) -> dict:
         "country": r.get("country", ""),
         "org_path": r.get("org_path", ""),
     }
-
-
-def dept_chain(hierarchy_path: str, names: dict[str, str]) -> list[str]:
-    chain: list[str] = []
-    for part in hierarchy_path.split(" > "):
-        if not part.startswith("FODepartment/"):
-            continue
-        dept_id = part.split("/", 1)[-1].split(":")[0]
-        name = names.get(dept_id, "")
-        if not name:
-            try:
-                import base64
-                pad = "=" * (4 - len(dept_id) % 4) if len(dept_id) % 4 else ""
-                name = base64.b64decode(dept_id + pad).decode("utf-8", errors="ignore")
-            except Exception:
-                name = dept_id
-        if name and (not chain or chain[-1] != name):
-            chain.append(name)
-    return chain
-
-
-def detect_country(chain: list[str], market_lookup: dict[str, str]) -> str:
-    """Country = segmento della catena dept che corrisponde a un mercato guidelines."""
-    for name in reversed(chain):
-        key = name.lower().strip()
-        if key in market_lookup:
-            return market_lookup[key]
-        for mk, canonical in market_lookup.items():
-            if len(mk) < 4:
-                continue
-            if mk in key or key in mk:
-                return canonical
-    for name in reversed(chain):
-        low = name.lower().strip()
-        if low and low not in _GENERIC_DEPT_NAMES and len(low) > 3:
-            return name
-    return ""
 
 
 def _org_text_matches(token: str, text: str, exact_short_code: bool) -> bool:
