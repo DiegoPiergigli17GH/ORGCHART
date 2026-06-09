@@ -156,7 +156,8 @@ class OrgChartApp(tk.Tk):
         ttk.Button(top, text="Ultimo export", command=self._load_org_default).pack(side="left")
 
         search_frame = ttk.LabelFrame(
-            self.tab_explore, text="Cerca mercato o area (es. RN, Romania, EES)"
+            self.tab_explore,
+            text="Cerca (es. RN, Romania, «Romania Marketing» = tutte le parole nell'organigramma)",
         )
         search_frame.pack(fill="x", **pad)
         srow = ttk.Frame(search_frame)
@@ -166,6 +167,12 @@ class OrgChartApp(tk.Tk):
         ent.pack(side="left", fill="x", expand=True)
         ent.bind("<Return>", lambda _: self._run_search())
         ttk.Button(srow, text="Cerca", command=self._run_search).pack(side="left", padx=8)
+        self.search_roles_var = tk.BooleanVar(value=False)
+        ttk.Checkbutton(
+            search_frame,
+            text="Includi anche ruolo / nome nella ricerca libera",
+            variable=self.search_roles_var,
+        ).pack(anchor="w", padx=10, pady=(0, 6))
 
         mid = ttk.Panedwindow(self.tab_explore, orient="horizontal")
         mid.pack(fill="both", expand=True, **pad)
@@ -190,14 +197,15 @@ class OrgChartApp(tk.Tk):
         self.dept_tree.pack(fill="both", expand=True, pady=4)
         self.dept_tree.bind("<<TreeviewSelect>>", lambda _: self._on_dept_select())
 
-        ttk.Label(right, text="Persone nel dipartimento selezionato").pack(anchor="w")
-        cols = ("name", "role", "email", "dept")
+        ttk.Label(right, text="Persone (filtrate)").pack(anchor="w")
+        cols = ("name", "country", "role", "email", "dept")
         self.emp_tree = ttk.Treeview(right, columns=cols, show="headings", height=20)
         for c, w, label in [
-            ("name", 160, "Nome"),
-            ("role", 200, "Ruolo"),
-            ("email", 200, "Email"),
-            ("dept", 160, "Dipartimento"),
+            ("name", 140, "Nome"),
+            ("country", 90, "Country"),
+            ("role", 160, "Ruolo"),
+            ("email", 170, "Email"),
+            ("dept", 140, "Dipartimento"),
         ]:
             self.emp_tree.heading(c, text=label)
             self.emp_tree.column(c, width=w, minwidth=80)
@@ -339,7 +347,9 @@ class OrgChartApp(tk.Tk):
                         )
                     else:
                         self.status_var.set(f"Fatto — {df['user_id'].nunique()} dipendenti")
-                        self.navigator.load_dataframe(df)
+                        self.navigator.load_dataframe(
+                            df, guidelines=self.guidelines if self.guidelines.loaded else None
+                        )
                         self._update_org_status()
                         messagebox.showinfo(
                             "Completato",
@@ -375,6 +385,8 @@ class OrgChartApp(tk.Tk):
         if path.exists():
             n = self.guidelines.load(path)
             self.guidelines_status.set(f"Guidelines: {path.name} ({n} mercati)")
+            if self.navigator.loaded:
+                self.navigator.enrich(self.guidelines)
         else:
             self.guidelines_status.set("Guidelines: file mancante (guidelines.xlsx)")
 
@@ -387,11 +399,15 @@ class OrgChartApp(tk.Tk):
         if path:
             n = self.guidelines.load(Path(path))
             self.guidelines_status.set(f"Guidelines: {Path(path).name} ({n} mercati)")
+            if self.navigator.loaded:
+                self.navigator.enrich(self.guidelines)
 
     def _load_org_default(self):
         out = APP_DIR / "output"
         out.mkdir(exist_ok=True)
-        latest = self.navigator.auto_load(out)
+        latest = self.navigator.auto_load(
+            out, guidelines=self.guidelines if self.guidelines.loaded else None
+        )
         self._update_org_status()
         if latest:
             self.explore_summary.set(f"Caricato ultimo export: {latest.name}")
@@ -403,7 +419,9 @@ class OrgChartApp(tk.Tk):
             initialdir=str(APP_DIR / "output"),
         )
         if path:
-            self.navigator.load_excel(Path(path))
+            self.navigator.load_excel(
+                Path(path), guidelines=self.guidelines if self.guidelines.loaded else None
+            )
             self._update_org_status()
 
     def _update_org_status(self):
@@ -440,11 +458,17 @@ class OrgChartApp(tk.Tk):
             self.market_list.selection_set(0)
             self._on_market_select()
         else:
-            self._current_subset = self.navigator.filter_by_text(query)
+            self._current_subset = self.navigator.filter_by_text(
+                query, include_roles=self.search_roles_var.get()
+            )
             self._rebuild_dept_tree()
             n = len(self._current_subset)
+            u = self._current_subset["user_id"].nunique() if n else 0
             self.breadcrumb_var.set(f"Ricerca libera: «{query}»")
-            self.explore_summary.set(f"{n} righe trovate (senza match guidelines)")
+            self.explore_summary.set(
+                f"{u} persone, {n} righe — filtro organigramma"
+                + (" + ruolo/nome" if self.search_roles_var.get() else "")
+            )
             self._show_all_employees()
 
     def _on_market_select(self):
@@ -491,12 +515,7 @@ class OrgChartApp(tk.Tk):
             rows = []
             if not self._current_subset.empty:
                 for _, r in self._current_subset.iterrows():
-                    rows.append({
-                        "full_name": r.get("full_name", ""),
-                        "job_title": r.get("job_title", ""),
-                        "email": r.get("email", ""),
-                        "department_name": r.get("department_name", ""),
-                    })
+                    rows.append(_employee_display_row(r))
 
         seen = set()
         for e in rows:
@@ -509,11 +528,22 @@ class OrgChartApp(tk.Tk):
                 "end",
                 values=(
                     e.get("full_name", ""),
+                    e.get("country", ""),
                     e.get("job_title", ""),
                     e.get("email", ""),
                     e.get("department_name", ""),
                 ),
             )
+
+
+def _employee_display_row(r) -> dict:
+    return {
+        "full_name": r.get("full_name", ""),
+        "job_title": r.get("job_title", ""),
+        "email": r.get("email", ""),
+        "department_name": r.get("department_name", ""),
+        "country": r.get("country", ""),
+    }
 
 
 def _find_employees(tree: dict, dept_name: str) -> list[dict]:

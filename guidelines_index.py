@@ -34,6 +34,16 @@ class MarketMatch:
     def label(self) -> str:
         return f"{self.market} — {self.description}"
 
+    @property
+    def org_filter_terms(self) -> list[str]:
+        """Termini sicuri per filtrare l'organigramma (no area/divisione — troppo ampia)."""
+        terms: list[str] = []
+        if self.description:
+            terms.append(self.description)
+        if self.market:
+            terms.append(self.market)
+        return terms
+
 
 class GuidelinesIndex:
     LEVELS = [
@@ -91,6 +101,17 @@ class GuidelinesIndex:
             ))
 
         return len(self._markets)
+
+    def market_name_lookup(self) -> dict[str, str]:
+        """Mappa nome mercato / sigla → nome paese/mercato per detect country."""
+        lookup: dict[str, str] = {}
+        for m in self._markets:
+            canonical = m.description or m.market
+            if m.description:
+                lookup[m.description.lower()] = m.description
+            if m.market:
+                lookup[m.market.lower()] = canonical
+        return lookup
 
     def search(self, query: str, limit: int = 25) -> list[MarketMatch]:
         q = query.strip().lower()
