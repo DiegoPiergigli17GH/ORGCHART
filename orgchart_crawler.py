@@ -33,7 +33,7 @@ import pandas as pd
 import requests
 import yaml
 
-from org_enrich import add_org_columns, load_market_lookup
+from org_enrich import add_org_columns, load_market_lookups
 
 try:
     from tqdm import tqdm
@@ -929,10 +929,10 @@ def build_dataframe(employees: list[dict], dept_names: dict) -> pd.DataFrame:
     df["manager_full_name"] = df["manager_user_id"].map(uid_to_name).fillna("")
     df["department_name"] = df["department_id"].map(dept_names).fillna("")
     df["multi_position"] = df.duplicated(subset=["user_id"], keep=False)
-    df = add_org_columns(df, dept_names, load_market_lookup(APP_DIR))
+    df = add_org_columns(df, dept_names, market_lookups=load_market_lookups(APP_DIR))
     cols = [
         "user_id", "first_name", "last_name", "full_name", "email",
-        "job_title", "country", "department_id", "department_name", "org_path",
+        "job_title", "country", "market", "department_id", "department_name", "org_path",
         "position_id", "manager_user_id", "manager_full_name", "empl_status",
         "hierarchy_path", "multi_position", "node_id",
     ]

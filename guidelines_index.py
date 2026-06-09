@@ -104,14 +104,30 @@ class GuidelinesIndex:
 
     def market_name_lookup(self) -> dict[str, str]:
         """Mappa nome mercato / sigla → nome paese/mercato per detect country."""
-        lookup: dict[str, str] = {}
+        return self.market_lookups()[0]
+
+    def market_lookups(self) -> tuple[dict[str, str], dict[str, str], dict[str, str]]:
+        """
+        Ritorna:
+          name_lookup     — chiave (nome o sigla) → nome paese canonical
+          code_by_country — nome paese lower → sigla Market (es. romania → RN)
+          code_to_country — sigla lower → nome paese
+        """
+        name_lookup: dict[str, str] = {}
+        code_by_country: dict[str, str] = {}
+        code_to_country: dict[str, str] = {}
+
         for m in self._markets:
             canonical = m.description or m.market
             if m.description:
-                lookup[m.description.lower()] = m.description
+                name_lookup[m.description.lower()] = m.description
+                if m.market:
+                    code_by_country[m.description.lower()] = m.market
             if m.market:
-                lookup[m.market.lower()] = canonical
-        return lookup
+                name_lookup[m.market.lower()] = canonical
+                code_to_country[m.market.lower()] = canonical
+
+        return name_lookup, code_by_country, code_to_country
 
     def search(self, query: str, limit: int = 25) -> list[MarketMatch]:
         q = query.strip().lower()

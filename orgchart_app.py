@@ -198,14 +198,15 @@ class OrgChartApp(tk.Tk):
         self.dept_tree.bind("<<TreeviewSelect>>", lambda _: self._on_dept_select())
 
         ttk.Label(right, text="Persone (filtrate)").pack(anchor="w")
-        cols = ("name", "country", "role", "email", "dept")
+        cols = ("name", "country", "market", "role", "email", "dept")
         self.emp_tree = ttk.Treeview(right, columns=cols, show="headings", height=20)
         for c, w, label in [
-            ("name", 140, "Nome"),
-            ("country", 90, "Country"),
-            ("role", 160, "Ruolo"),
-            ("email", 170, "Email"),
-            ("dept", 140, "Dipartimento"),
+            ("name", 130, "Nome"),
+            ("country", 85, "Country"),
+            ("market", 50, "Sigla"),
+            ("role", 140, "Ruolo"),
+            ("email", 160, "Email"),
+            ("dept", 130, "Dipartimento"),
         ]:
             self.emp_tree.heading(c, text=label)
             self.emp_tree.column(c, width=w, minwidth=80)
@@ -529,6 +530,7 @@ class OrgChartApp(tk.Tk):
                 values=(
                     e.get("full_name", ""),
                     e.get("country", ""),
+                    e.get("market", ""),
                     e.get("job_title", ""),
                     e.get("email", ""),
                     e.get("department_name", ""),
@@ -543,6 +545,7 @@ def _employee_display_row(r) -> dict:
         "email": r.get("email", ""),
         "department_name": r.get("department_name", ""),
         "country": r.get("country", ""),
+        "market": r.get("market", ""),
     }
 
 
