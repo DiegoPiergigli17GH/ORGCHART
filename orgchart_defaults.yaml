@@ -5,6 +5,13 @@ company_name: "Ariston Group"
 perspective: 4928
 chart_id: "4925"
 root_node_id: "FODepartment::NTAwMDAyMjU:3.FODepartment::NTAzMTQ3MjU:3"
+# DownLinks expand FODepartment — come DevTools (dept + position + matrix in un colpo)
+department_down_links:
+  - FODepartment_to_FODepartment
+  - FODepartment_to_Position
+  - FODepartment_to_ManagerPosition_to_Matrix
+  - PositionMatrix
+  - ROOTLINK
 request_delay: 0.8      # aumenta a 1.2 se vedi "connessione interrotta"
 max_retries: 8
 retry_backoff: 4      # secondi base tra retry (× numero tentativo)

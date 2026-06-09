@@ -314,7 +314,8 @@ class OrgChartApp(tk.Tk):
 
         self._set_running(True)
         self.status_var.set("Estrazione in corso…")
-        self._append_log("——— Avvio estrazione ———")
+        from orgchart_crawler import CRAWLER_VERSION
+        self._append_log(f"——— Avvio estrazione (crawler v{CRAWLER_VERSION}) ———")
 
         def progress(calls: int, emp: int, q: int):
             self.after(

@@ -1,19 +1,21 @@
 """
-SAP SuccessFactors / Ingentis Org Chart — Crawler v10.0
+SAP SuccessFactors / Ingentis Org Chart — Crawler v11.0
 
-API modes:
-  isListRequest: false → expand one node, children returned inline (browser click)
-  isListRequest: true  → batch fetch known node ids (Position + EmpJob)
+In molte prospettive Ingentis (es. Ariston) i dipendenti NON compaiono come
+nodi EmpJob nei children: sono in Position.data._IOM_INTERNAL_.calculations
+(es. EmpJobFullNamePOS, CountEmpJobsperPosition).
 
 Crawl flow:
-  1. BFS FODepartment → map all departments
-  2. Per ogni dept: FODepartment_to_Position → scopre Position (path completo)
-  3. BFS Position_to_Position → tutte le posizioni nell'albero gerarchico
-  4. Batch isListRequest=true su Position ids → EmpJob / dipendenti
+  1. BFS FODepartment (downLinks come il browser) → dept + Position inline
+  2. Estrae dipendenti da nodi Position (calculations + eventuali EmpJob figli)
+  3. BFS Position_to_Position per la gerarchia
+  4. Batch Position opzionale per arricchire con userId da EmpJob
   5. Export Excel
 
 Setup: copy config.example.yaml → config.yaml and fill SESSION / CSRF from DevTools.
 """
+
+CRAWLER_VERSION = "11.0"
 
 import base64
 import json
@@ -270,6 +272,20 @@ DOWN_LINKS_BY_TYPE = {
     "Position": ["Position_to_EmpJob", "Position_to_Position"],
 }
 
+# DownLinks usati dal browser Ariston su expand FODepartment (orgchart_defaults.yaml)
+DEFAULT_DEPARTMENT_DOWN_LINKS = [
+    "FODepartment_to_FODepartment",
+    "FODepartment_to_Position",
+    "FODepartment_to_ManagerPosition_to_Matrix",
+    "PositionMatrix",
+    "ROOTLINK",
+]
+
+
+def _department_down_links(cfg: dict) -> list[str]:
+    links = _cfg(cfg, "department_down_links")
+    return links if links else DEFAULT_DEPARTMENT_DOWN_LINKS
+
 
 def dept_level(node_id: str) -> int:
     return node_id.count("FODepartment::")
@@ -397,9 +413,13 @@ def expand_node(
     call_num: int = 0,
     mode: str = "dept",
 ) -> Optional[dict]:
-    if mode == "dept_pos":
+    if mode in ("dept", "dept_pos"):
         api_type = "FODepartment"
-        down_links = DOWN_LINKS_BY_TYPE["FODepartment_positions"]
+        down_links = (
+            DOWN_LINKS_BY_TYPE["FODepartment_positions"]
+            if mode == "dept_pos"
+            else _department_down_links(cfg)
+        )
     else:
         api_type = node_type
         down_links = DOWN_LINKS_BY_TYPE.get(
@@ -491,9 +511,6 @@ def _process_item(
         if n_sub > 0 and not children:
             to_enqueue.append((iid, "FODepartment", "dept", manager))
 
-        # Scopri Position sotto ogni dipartimento (non solo foglie)
-        to_enqueue.append((iid, "FODepartment", "dept_pos", manager))
-
     elif itype == "Position":
         if "Position::" in iid:
             collected_positions.add(iid)
@@ -524,6 +541,17 @@ def _process_item(
 
         mgr = pos_uids[0] if pos_uids else manager
 
+        if not pos_uids:
+            emp = _extract_emp_from_position(
+                iid, idata, pos_code, job_title, dept_id, h_path, mgr, email_domain
+            )
+            if emp:
+                key = (emp["user_id"], iid)
+                if key not in seen_employees:
+                    seen_employees.add(key)
+                    employees.append(emp)
+                    pos_uids.append(emp["user_id"])
+
         has_emp_children = any(c.get("type") == "EmpJob" for c in children)
         has_pos_children = any(c.get("type") == "Position" for c in children)
 
@@ -532,6 +560,99 @@ def _process_item(
 
         if counts.get("Position_to_EmpJob", 0) > 0 and not has_emp_children:
             collected_positions.add(iid)
+
+
+def _get_calculations(idata: dict) -> dict:
+    """Campi calcolati Ingentis (chiave con o senza underscore iniziale)."""
+    for key in ("_IOM_INTERNAL_", "IOM_INTERNAL"):
+        block = idata.get(key, {})
+        if isinstance(block, dict):
+            calcs = block.get("calculations", {})
+            if isinstance(calcs, dict) and calcs:
+                return calcs
+    calcs = idata.get("calculations", {})
+    return calcs if isinstance(calcs, dict) else {}
+
+
+def _calc_str(calcs: dict, *keys: str) -> str:
+    for key in keys:
+        val = calcs.get(key)
+        if val is not None and str(val).strip():
+            return str(val).strip()
+    return ""
+
+
+def _position_employee_count(calcs: dict) -> int:
+    raw = _calc_str(
+        calcs,
+        "CountEmpJobsperPosition",
+        "CountEmpJobsPerPosition",
+        "CountEmpJobs",
+    )
+    if not raw:
+        return 0
+    try:
+        return int(float(raw))
+    except ValueError:
+        return 0
+
+
+def _extract_emp_from_position(
+    position_id: str,
+    idata: dict,
+    pos_code: str,
+    job_title: str,
+    dept_id: str,
+    h_path: str,
+    manager: str,
+    email_domain: str,
+) -> Optional[dict]:
+    """
+    Dipendente embedded nella Position (prospettiva senza nodi EmpJob espansi).
+    """
+    calcs = _get_calculations(idata)
+    full_name = _calc_str(
+        calcs,
+        "EmpJobFullNamePOS",
+        "Name",
+        "FullName",
+        "EmployeeName",
+    )
+    emp_count = _position_employee_count(calcs)
+    if not full_name and emp_count <= 0:
+        return None
+    if not full_name:
+        return None
+
+    first, last = parse_name(full_name, _calc_str(calcs, "FullNameAllCaps", "NameAllCaps"))
+    uid = _calc_str(
+        calcs,
+        "EmpJobUserIdPOS",
+        "UserIdPOS",
+        "userId",
+        "EmpJobUserId",
+    ) or str(idata.get("userId") or "").strip()
+    if not uid:
+        uid = f"pos:{pos_code}" if pos_code else f"posnode:{position_id.rsplit('Position::', 1)[-1]}"
+
+    status = _calc_str(calcs, "EmpJobStatusPOS", "emplStatus", "EmplStatus")
+    title = job_title or _calc_str(calcs, "EmpJobTitlePOS", "JobTitle", "externalName_defaultValue")
+
+    return {
+        "user_id": uid,
+        "first_name": first,
+        "last_name": last,
+        "full_name": full_name.title(),
+        "job_title": title,
+        "position_id": pos_code,
+        "department_id": dept_id,
+        "manager_user_id": manager,
+        "empl_status": status,
+        "email": build_email(first, last, email_domain),
+        "hierarchy_path": h_path,
+        "node_id": position_id,
+        "data_source": "position_calculations",
+    }
 
 
 def _extract_emp(
@@ -624,7 +745,7 @@ def crawl(
     batch_size = int(_cfg(cfg, "position_batch_size", 20))
 
     queue: deque = deque([(root_id, "FODepartment", "dept", "")])
-    log.info("Avvio crawl v10 root=%s", root_id)
+    log.info("Avvio crawl v%s root=%s", CRAWLER_VERSION, root_id)
 
     pbar_ctx = _SilentBar() if progress_callback else tqdm(desc="Chiamate API", unit=" calls")
     with pbar_ctx as pbar:
@@ -883,7 +1004,7 @@ def export_excel(df: pd.DataFrame, dept_names: dict, cfg: dict) -> Path:
 
 def main() -> pd.DataFrame:
     print("=" * 70)
-    print("  SAP SuccessFactors / Ingentis Org Chart Extractor  v10.0")
+    print(f"  SAP SuccessFactors / Ingentis Org Chart Extractor  v{CRAWLER_VERSION}")
     print(f"  {datetime.now().strftime('%Y-%m-%d %H:%M:%S')}")
     print("=" * 70)
 
